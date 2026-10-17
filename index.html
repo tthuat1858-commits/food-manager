@@ -138,19 +138,28 @@ function completeMenuDay(date){const m=state.activeMenu;if(!m)return alert('请�
 function undoMenuDay(date){const m=state.activeMenu,entry=m&&m.completedDays&&m.completedDays[date];if(!entry)return alert('这一天没有已确认的扣减记录。');if(!confirm('确定撤销 '+date+' 的菜单扣减，并恢复扣减前的库存数量吗？如果之后手动修改过库存，撤销会恢复到当时扣减前的数量。'))return;entry.changes.forEach(c=>{const item=state.inventory.find(i=>String(i.id)===String(c.inventoryId));if(!item)return;const before=item.qty;item.qty=Number(c.before);state.inventoryHistory.push({time:new Date().toLocaleString(),name:item.name,before,after:item.qty,unit:item.unit||'',reason:'撤销菜单扣减 '+date,transactionId:entry.transactionId})});delete m.completedDays[date];save();alert('已撤销 '+date+' 的库存扣减。')}
 function renderWeight(){
  const root=$('weightSummary'); if(!root)return;
- const person=$('weightPerson').value||'me';
- const rows=state.weightRecords.filter(x=>x.person===person).slice().sort((a,b)=>a.date.localeCompare(b.date));
- const latest=rows.length?rows[rows.length-1]:null;
- const last7=rows.slice(-7); const avg=last7.length?last7.reduce((a,x)=>a+Number(x.weight||0),0)/last7.length:null;
- const prev=rows.length>=2?rows[rows.length-2]:null;
- root.innerHTML=`<div class="grid"><div class="card"><div class="muted">${personName(person)}最近体重</div><div class="metric">${latest?fmt(latest.weight):'—'} <small>kg</small></div><div class="muted">${latest?esc(latest.date):'尚无记录'}</div></div><div class="card"><div class="muted">最近 ${last7.length} 次平均</div><div class="metric">${avg===null?'—':fmt(avg)} <small>kg</small></div><div class="muted">${prev&&latest?'最近两次变化：'+(Number(latest.weight)-Number(prev.weight)>0?'+':'')+fmt(Number(latest.weight)-Number(prev.weight))+' kg':'记录更多体重后显示变化'}</div></div></div>`;
- if(rows.length<1){$('weightChart').innerHTML='<div class="empty">保存体重后，这里会显示体重趋势。</div>';}else{
-  const pts=rows.slice(-30),vals=pts.map(x=>Number(x.weight)),min=Math.min(...vals),max=Math.max(...vals),span=max-min||1,w=640,h=180,pad=24;
-  const xy=pts.map((x,i)=>({x:pad+(pts.length===1?0:i*(w-2*pad)/(pts.length-1)),y:h-pad-((Number(x.weight)-min)/span)*(h-2*pad),date:x.date,weight:x.weight}));
-  const line=xy.map((q,i)=>(i?'L':'M')+q.x.toFixed(1)+' '+q.y.toFixed(1)).join(' ');
-  $('weightChart').innerHTML=`<h3>最近 ${pts.length} 次体重趋势（最多显示 30 次）</h3><div class="tablewrap"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="体重趋势图" style="width:100%;min-width:300px;max-height:240px"><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#d0d5dd"/><path d="${line}" fill="none" stroke="#2563eb" stroke-width="3"/>${xy.map(q=>`<circle cx="${q.x}" cy="${q.y}" r="4" fill="#2563eb"><title>${esc(q.date)}：${fmt(q.weight)} kg</title></circle>`).join('')}<text x="${pad}" y="14" font-size="12" fill="currentColor">${fmt(max)} kg</text><text x="${pad}" y="${h-3}" font-size="12" fill="currentColor">${fmt(min)} kg</text></svg></div>`;
+ const people=['me','partner'];
+ const sorted={};
+ people.forEach(p=>sorted[p]=state.weightRecords.filter(x=>x.person===p).slice().sort((a,b)=>a.date.localeCompare(b.date)));
+ root.innerHTML='<div class="grid">'+people.map(person=>{
+  const rows=sorted[person],latest=rows.length?rows[rows.length-1]:null,last7=rows.slice(-7),avg=last7.length?last7.reduce((a,x)=>a+Number(x.weight||0),0)/last7.length:null,prev=rows.length>=2?rows[rows.length-2]:null;
+  const change=prev&&latest?Number(latest.weight)-Number(prev.weight):null;
+  return `<div class="card"><h3>${personName(person)}</h3><div class="muted">最近体重</div><div class="metric">${latest?fmt(latest.weight):'—'} <small>kg</small></div><div class="muted">${latest?esc(latest.date):'尚无记录'}</div><div class="muted" style="margin-top:8px">最近 ${last7.length} 次平均：<strong>${avg===null?'—':fmt(avg)} kg</strong></div><div class="muted">${change===null?'记录更多体重后显示变化':'最近两次变化：'+(change>0?'+':'')+fmt(change)+' kg'}</div></div>`;
+ }).join('')+'</div>';
+ const ptsByPerson={me:sorted.me.slice(-30),partner:sorted.partner.slice(-30)};
+ const all=[...ptsByPerson.me,...ptsByPerson.partner];
+ if(!all.length){$('weightChart').innerHTML='<div class="empty">保存本人或伴侣的体重后，这里会同时显示两人的趋势。</div>';}else{
+  const dates=[...new Set(all.map(x=>x.date))].sort();
+  const vals=all.map(x=>Number(x.weight)),min=Math.min(...vals),max=Math.max(...vals),span=max-min||1,w=720,h=220,pad=34;
+  const xFor=date=>pad+(dates.length===1?0:dates.indexOf(date)*(w-2*pad)/(dates.length-1));
+  const yFor=weight=>h-pad-((Number(weight)-min)/span)*(h-2*pad);
+  const colors={me:'#2563eb',partner:'#0f766e'};
+  const paths=people.map(person=>{const pts=ptsByPerson[person];const xy=pts.map(q=>({...q,x:xFor(q.date),y:yFor(q.weight)}));const line=xy.map((q,i)=>(i?'L':'M')+q.x.toFixed(1)+' '+q.y.toFixed(1)).join(' ');return `<path d="${line}" fill="none" stroke="${colors[person]}" stroke-width="3"/>${xy.map(q=>`<circle cx="${q.x}" cy="${q.y}" r="4" fill="${colors[person]}"><title>${personName(person)} · ${esc(q.date)}：${fmt(q.weight)} kg</title></circle>`).join('')}`}).join('');
+  const first=dates[0],last=dates[dates.length-1];
+  $('weightChart').innerHTML=`<h3>两人体重趋势（每人最多显示最近 30 次）</h3><div class="muted" style="margin-bottom:8px"><span style="color:${colors.me};font-weight:700">● 本人</span>　<span style="color:${colors.partner};font-weight:700">● 伴侣</span></div><div class="tablewrap"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="本人和伴侣体重趋势对比" style="width:100%;min-width:300px;max-height:280px"><line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#d0d5dd"/><text x="${pad}" y="14" font-size="12" fill="currentColor">${fmt(max)} kg</text><text x="${pad}" y="${h-4}" font-size="12" fill="currentColor">${fmt(min)} kg</text>${paths}<text x="${pad}" y="${h-18}" font-size="10" fill="currentColor">${esc(first)}</text><text x="${w-pad-70}" y="${h-18}" font-size="10" fill="currentColor">${esc(last)}</text></svg></div>`;
  }
- $('weightList').innerHTML=rows.length?`<h3>体重历史</h3><div class="list">${rows.slice().reverse().slice(0,30).map(x=>`<div class="item"><div><strong>${esc(x.date)} · ${fmt(x.weight)} kg</strong>${x.note?`<div class="muted">${esc(x.note)}</div>`:''}</div><button class="btn danger small" data-delete-weight="${x.id}">删除</button></div>`).join('')}</div>`:'<div class="empty">还没有体重记录。</div>';
+ const allRows=state.weightRecords.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(a.person||'').localeCompare(b.person||'')).slice(0,60);
+ $('weightList').innerHTML=allRows.length?`<h3>两人体重历史（最近 60 条）</h3><div class="list">${allRows.map(x=>`<div class="item"><div><strong>${esc(x.date)} · ${esc(personName(x.person))} · ${fmt(x.weight)} kg</strong>${x.note?`<div class="muted">${esc(x.note)}</div>`:''}</div><button class="btn danger small" data-delete-weight="${x.id}">删除</button></div>`).join('')}</div>`:'<div class="empty">还没有体重记录。</div>';
 }
 $('saveWeight').onclick=()=>{const date=$('weightDate').value||today(),person=$('weightPerson').value,weight=Number($('weightValue').value);if(!Number.isFinite(weight)||weight<25||weight>300)return alert('请输入 25–300 kg 之间的有效体重。');const existing=state.weightRecords.find(x=>x.date===date&&x.person===person);if(existing){existing.weight=weight;existing.updatedAt=new Date().toISOString()}else state.weightRecords.push({id:Date.now(),date,person,weight,createdAt:new Date().toISOString()});state.weightRecords.sort((a,b)=>a.date.localeCompare(b.date));
  // Update the profile's latest known weight and recalculate estimated targets from the user's chosen profile settings.
